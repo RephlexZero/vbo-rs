@@ -3,7 +3,9 @@
 use std::{fmt::Write, hint::black_box};
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use racelogic_vbo::{Parser, Telemetry};
+#[cfg(feature = "fast-float")]
+use racelogic_vbo::FloatParser;
+use racelogic_vbo::{ParseOptions, Parser, Telemetry};
 
 const SAMPLE_COUNT: usize = 100_000;
 const SAMPLE_RATE_HZ: usize = 10;
@@ -53,11 +55,27 @@ fn parser_benchmarks(c: &mut Criterion) {
         u64::try_from(input.len()).unwrap_or(u64::MAX),
     ));
     group.bench_with_input(
-        BenchmarkId::new("strict_in_memory", SAMPLE_COUNT),
+        BenchmarkId::new("strict_in_memory/default", SAMPLE_COUNT),
         &input,
         |bench, input| {
             bench.iter(|| {
                 Parser::default()
+                    .parse_str(black_box(input))
+                    .expect("generated benchmark input must parse")
+            });
+        },
+    );
+    #[cfg(feature = "fast-float")]
+    group.bench_with_input(
+        BenchmarkId::new("strict_in_memory/fast_float", SAMPLE_COUNT),
+        &input,
+        |bench, input| {
+            let parser = Parser::new(ParseOptions {
+                float_parser: FloatParser::Fast,
+                ..ParseOptions::default()
+            });
+            bench.iter(|| {
+                parser
                     .parse_str(black_box(input))
                     .expect("generated benchmark input must parse")
             });

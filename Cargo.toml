@@ -21,6 +21,8 @@ gpx = []
 # Apache Parquet is opt-in because its implementation is intentionally dependency-heavy.
 parquet = ["dep:parquet"]
 all-formats = ["csv", "gpx", "parquet", "serde"]
+# Opt-in accelerated ASCII float conversion for throughput-sensitive ingestion.
+fast-float = ["dep:lexical-core"]
 
 [dependencies]
 memchr = "2.7"
@@ -28,6 +30,7 @@ thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"], optional = true }
 csv = { version = "1.3", optional = true }
 parquet = { version = "53.3.0", default-features = false, optional = true }
+lexical-core = { version = "1.0", optional = true }
 
 [dev-dependencies]
 bytes = "1.0"

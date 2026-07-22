@@ -22,6 +22,8 @@ pub struct ParseOptions {
     pub max_rows: usize,
     /// Hard cap for retained recovery diagnostics.
     pub max_issues: usize,
+    /// Numeric conversion backend used for data fields.
+    pub float_parser: FloatParser,
 }
 
 impl Default for ParseOptions {
@@ -31,8 +33,24 @@ impl Default for ParseOptions {
             max_line_bytes: 1024 * 1024,
             max_rows: 20_000_000,
             max_issues: 10_000,
+            float_parser: FloatParser::Standard,
         }
     }
+}
+
+/// Numeric conversion backend used by [`Parser`].
+///
+/// [`Self::Fast`] is available only with the `fast-float` Cargo feature and is intended for
+/// high-throughput ASCII telemetry ingestion. The parser preserves the same VBO error shape as
+/// the standard backend.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum FloatParser {
+    /// Rust's standard `f64` parser; the default compatibility backend.
+    #[default]
+    Standard,
+    /// `lexical-core`'s optimized float parser.
+    #[cfg(feature = "fast-float")]
+    Fast,
 }
 
 /// Parser for legacy ASCII Racelogic VBOX `.vbo` recordings.
@@ -216,7 +234,13 @@ impl Parser {
                         });
                     }
                     row_values.clear();
-                    match parse_row_into(text, channels.len(), line, &mut row_values) {
+                    match parse_row_into(
+                        text,
+                        channels.len(),
+                        line,
+                        &mut row_values,
+                        self.options.float_parser,
+                    ) {
                         Ok(()) => {
                             visitor(StreamSample::new(
                                 rows,
@@ -306,6 +330,7 @@ fn parse_row_into(
     expected: usize,
     line: usize,
     output: &mut Vec<f64>,
+    float_parser: FloatParser,
 ) -> Result<(), ParseError> {
     let found = text.split_ascii_whitespace().count();
     if found != expected {
@@ -318,7 +343,7 @@ fn parse_row_into(
     let row_start = output.len();
     output.reserve(expected);
     for (index, field) in text.split_ascii_whitespace().enumerate() {
-        let value = field.parse::<f64>().map_err(|_| ParseError::InvalidNumber {
+        let value = parse_float(field, float_parser).map_err(|()| ParseError::InvalidNumber {
             line,
             column: index + 1,
             value: field.to_owned(),
@@ -332,6 +357,14 @@ fn parse_row_into(
         }
     }
     Ok(())
+}
+
+fn parse_float(field: &str, float_parser: FloatParser) -> Result<f64, ()> {
+    match float_parser {
+        FloatParser::Standard => field.parse::<f64>().map_err(|_| ()),
+        #[cfg(feature = "fast-float")]
+        FloatParser::Fast => lexical_core::parse::<f64>(field.as_bytes()).map_err(|_| ()),
+    }
 }
 
 fn issue_from(error: ParseError) -> ParseIssue {
