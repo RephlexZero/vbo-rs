@@ -22,6 +22,26 @@ pub struct SatelliteQuality {
     pub brake_trigger: bool,
 }
 
+/// Summary of finite samples from a numeric channel.
+///
+/// Values retain the channel's source unit unless the summary is exposed through one of the
+/// unit-normalised inertial or turn fields in [`SessionMetrics`].  Every VBO data column is
+/// represented by [`SessionMetrics::numeric_channels`], which lets callers analyse CAN-derived
+/// channels without relying on a device- or supplier-specific channel naming convention.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug, PartialEq)]
+pub struct NumericChannelSummary {
+    /// Name declared in `[column names]`.
+    pub channel: String,
+    /// Unit declared in `[channel units]`, or the canonical unit of a converted summary.
+    pub unit: Option<String>,
+    /// Number of finite samples included in the summary.
+    pub samples: usize,
+    pub minimum: f64,
+    pub maximum: f64,
+    pub mean: f64,
+}
+
 /// Deterministic summary calculations over a VBO session.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SessionMetrics {
@@ -33,6 +53,23 @@ pub struct SessionMetrics {
     pub peak_acceleration_mps2: Option<f64>,
     pub peak_braking_mps2: Option<f64>,
     pub timing_anomalies: usize,
+    /// Direct longitudinal accelerometer samples, normalised to `m/s²` when both a recognised
+    /// channel alias and unit are present.
+    pub longitudinal_acceleration: Option<NumericChannelSummary>,
+    /// Direct lateral accelerometer samples, normalised to `m/s²`.
+    pub lateral_acceleration: Option<NumericChannelSummary>,
+    /// Direct vertical accelerometer samples, normalised to `m/s²`.
+    pub vertical_acceleration: Option<NumericChannelSummary>,
+    /// Yaw-rate samples, normalised to `deg/s`.
+    pub yaw_rate: Option<NumericChannelSummary>,
+    /// Turn-radius samples, normalised to metres. Negative values are ignored as non-physical.
+    pub radius_of_turn: Option<NumericChannelSummary>,
+    /// Source-unit summaries for all numeric columns, including application-defined CAN data.
+    ///
+    /// VBO does not provide a universal marker for CAN-derived channels, so this vector avoids
+    /// guessing their provenance. Select the channels meaningful to the vehicle/application by
+    /// their declared names.
+    pub numeric_channels: Vec<NumericChannelSummary>,
 }
 
 /// High-level telemetry helpers. They never panic on missing channels or malformed samples.
@@ -93,8 +130,15 @@ impl Telemetry for Vbo {
         let time_column = self.alias_column(&["time"]);
         let latitude_column = self.alias_column(&["lat", "latitude"]);
         let longitude_column = self.alias_column(&["long", "longitude", "lon"]);
+        let native_channels = self.native_channel_metrics();
         let mut result = SessionMetrics {
             samples: self.row_count(),
+            longitudinal_acceleration: native_channels.longitudinal_acceleration,
+            lateral_acceleration: native_channels.lateral_acceleration,
+            vertical_acceleration: native_channels.vertical_acceleration,
+            yaw_rate: native_channels.yaw_rate,
+            radius_of_turn: native_channels.radius_of_turn,
+            numeric_channels: self.numeric_channel_summaries(),
             ..SessionMetrics::default()
         };
         let mut previous_time = None;
@@ -187,7 +231,154 @@ impl Vbo {
                 .any(|alias| normalise(&channel.name) == *alias)
         })
     }
+
+    fn numeric_channel_summaries(&self) -> Vec<NumericChannelSummary> {
+        let mut accumulators = vec![ChannelSummaryAccumulator::default(); self.column_count()];
+        for row in 0..self.row_count() {
+            for (column, accumulator) in accumulators.iter_mut().enumerate() {
+                if let Some(value) = self.value(row, column).filter(|value| value.is_finite()) {
+                    accumulator.push(value);
+                }
+            }
+        }
+        accumulators
+            .into_iter()
+            .zip(&self.channels)
+            .filter_map(|(summary, channel)| {
+                summary.finish(channel.name.clone(), channel.unit.clone())
+            })
+            .collect()
+    }
+
+    fn native_channel_metrics(&self) -> NativeChannelMetrics {
+        NativeChannelMetrics {
+            longitudinal_acceleration: self
+                .alias_column(LONGITUDINAL_ACCELERATION_ALIASES)
+                .and_then(|column| self.converted_channel(column, acceleration_to_mps2, "m/s²")),
+            lateral_acceleration: self
+                .alias_column(LATERAL_ACCELERATION_ALIASES)
+                .and_then(|column| self.converted_channel(column, acceleration_to_mps2, "m/s²")),
+            vertical_acceleration: self
+                .alias_column(VERTICAL_ACCELERATION_ALIASES)
+                .and_then(|column| self.converted_channel(column, acceleration_to_mps2, "m/s²")),
+            yaw_rate: self.alias_column(YAW_RATE_ALIASES).and_then(|column| {
+                self.converted_channel(column, yaw_rate_to_degrees_per_second, "deg/s")
+            }),
+            radius_of_turn: self
+                .alias_column(RADIUS_OF_TURN_ALIASES)
+                .and_then(|column| {
+                    self.converted_channel_with_filter(column, length_to_metres, "m", |value| {
+                        value >= 0.0
+                    })
+                }),
+        }
+    }
+
+    fn converted_channel(
+        &self,
+        column: usize,
+        factor: fn(&str) -> Option<f64>,
+        canonical_unit: &str,
+    ) -> Option<NumericChannelSummary> {
+        self.converted_channel_with_filter(column, factor, canonical_unit, |_| true)
+    }
+
+    fn converted_channel_with_filter(
+        &self,
+        column: usize,
+        factor: fn(&str) -> Option<f64>,
+        canonical_unit: &str,
+        accept: impl Fn(f64) -> bool,
+    ) -> Option<NumericChannelSummary> {
+        let source_unit = self.channels.get(column)?.unit.as_deref()?;
+        let factor = factor(source_unit)?;
+        let mut summary = ChannelSummaryAccumulator::default();
+        for row in 0..self.row_count() {
+            if let Some(value) = self
+                .value(row, column)
+                .map(|value| value * factor)
+                .filter(|value| value.is_finite() && accept(*value))
+            {
+                summary.push(value);
+            }
+        }
+        summary.finish(
+            self.channels.get(column)?.name.clone(),
+            Some(canonical_unit.to_owned()),
+        )
+    }
 }
+
+#[derive(Default)]
+struct NativeChannelMetrics {
+    longitudinal_acceleration: Option<NumericChannelSummary>,
+    lateral_acceleration: Option<NumericChannelSummary>,
+    vertical_acceleration: Option<NumericChannelSummary>,
+    yaw_rate: Option<NumericChannelSummary>,
+    radius_of_turn: Option<NumericChannelSummary>,
+}
+
+#[derive(Clone, Default)]
+struct ChannelSummaryAccumulator {
+    samples: usize,
+    minimum: f64,
+    maximum: f64,
+    sum: f64,
+}
+
+impl ChannelSummaryAccumulator {
+    fn push(&mut self, value: f64) {
+        if self.samples == 0 {
+            self.minimum = value;
+            self.maximum = value;
+        } else {
+            self.minimum = self.minimum.min(value);
+            self.maximum = self.maximum.max(value);
+        }
+        self.samples += 1;
+        self.sum += value;
+    }
+
+    fn finish(self, channel: String, unit: Option<String>) -> Option<NumericChannelSummary> {
+        let samples = u32::try_from(self.samples).unwrap_or(u32::MAX);
+        (samples > 0).then_some(NumericChannelSummary {
+            channel,
+            unit,
+            samples: self.samples,
+            minimum: self.minimum,
+            maximum: self.maximum,
+            mean: self.sum / f64::from(samples),
+        })
+    }
+}
+
+const LONGITUDINAL_ACCELERATION_ALIASES: &[&str] = &[
+    "longacc",
+    "longitudinalacceleration",
+    "longitudinalaccel",
+    "accelx",
+    "xaccel",
+    "xacceleration",
+];
+const LATERAL_ACCELERATION_ALIASES: &[&str] = &[
+    "latacc",
+    "lateralacceleration",
+    "lateralaccel",
+    "accely",
+    "yaccel",
+    "yacceleration",
+];
+const VERTICAL_ACCELERATION_ALIASES: &[&str] = &[
+    "vertacc",
+    "verticalacc",
+    "verticalacceleration",
+    "verticalaccel",
+    "accelz",
+    "zaccel",
+    "zacceleration",
+];
+const YAW_RATE_ALIASES: &[&str] = &["yawrate", "yawangularrate", "angularratez"];
+const RADIUS_OF_TURN_ALIASES: &[&str] = &["radiusofturn", "turnradius", "radius"];
 
 /// Converts the VBO `DDMM.MMMM` / `DDDMM.MMMM` representation to decimal degrees.
 /// Racelogic documents positive longitude as west; this function returns conventional longitude,
@@ -245,6 +436,35 @@ fn speed_to_kmh_factor(unit: &str) -> Option<f64> {
         "knots" | "knot" | "kts" => Some(1.852),
         "mph" | "milesperhour" => Some(1.609_344),
         "ms" | "metrespersecond" | "meterspersecond" => Some(3.6),
+        _ => None,
+    }
+}
+
+fn acceleration_to_mps2(unit: &str) -> Option<f64> {
+    match normalise(unit).as_str() {
+        "g" | "gee" | "gravity" | "gravities" => Some(9.806_65),
+        "ms2" | "mps2" | "metrespersecondsquared" | "meterspersecondsquared" => Some(1.0),
+        "fts2" | "fps2" | "feetpersecondsquared" => Some(0.3048),
+        _ => None,
+    }
+}
+
+fn yaw_rate_to_degrees_per_second(unit: &str) -> Option<f64> {
+    match normalise(unit).as_str() {
+        "degs" | "degsec" | "degreespersecond" | "degreessecond" => Some(1.0),
+        "rads" | "radsec" | "radianspersecond" | "radianssecond" => {
+            Some(180.0 / std::f64::consts::PI)
+        }
+        _ => None,
+    }
+}
+
+fn length_to_metres(unit: &str) -> Option<f64> {
+    match normalise(unit).as_str() {
+        "m" | "metre" | "metres" | "meter" | "meters" => Some(1.0),
+        "km" | "kilometre" | "kilometres" | "kilometer" | "kilometers" => Some(1_000.0),
+        "ft" | "foot" | "feet" => Some(0.3048),
+        "mi" | "mile" | "miles" => Some(1_609.344),
         _ => None,
     }
 }

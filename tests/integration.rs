@@ -85,6 +85,65 @@ fn telemetry_converts_declared_speed_units() {
     assert_eq!(metrics.max_speed_kmh, Some(37.04));
 }
 
+#[test]
+fn telemetry_summarises_inertial_turn_and_application_defined_channels() {
+    let source = "[channel units]\nhhmmss g m/s2 g rad/s ft Nm\n[column names]\ntime long_acc lat-acc vertical_acc yaw_rate radius_of_turn CAN_Engine_Torque\n[data]\n120000.0 1 3 -0.5 3.141592653589793 100 250\n120001.0 2 4 0.5 0 50 270\n120002.0 3 5 1.0 -1.5707963267948966 -10 260\n";
+    let metrics = Parser::default()
+        .parse_str(source)
+        .expect("parse")
+        .analyse();
+
+    let longitudinal = metrics
+        .longitudinal_acceleration
+        .as_ref()
+        .expect("longitudinal acceleration");
+    assert_eq!(longitudinal.unit.as_deref(), Some("m/s²"));
+    assert_eq!(longitudinal.samples, 3);
+    assert!((longitudinal.maximum - 3.0 * 9.806_65).abs() < 1e-12);
+    assert_eq!(
+        metrics
+            .lateral_acceleration
+            .as_ref()
+            .expect("lateral acceleration")
+            .minimum,
+        3.0
+    );
+    assert_eq!(
+        metrics
+            .vertical_acceleration
+            .as_ref()
+            .expect("vertical acceleration")
+            .maximum,
+        9.806_65
+    );
+    let yaw_rate = metrics.yaw_rate.as_ref().expect("yaw rate");
+    assert_eq!(yaw_rate.unit.as_deref(), Some("deg/s"));
+    assert!((yaw_rate.maximum - 180.0).abs() < 1e-10);
+    let radius = metrics.radius_of_turn.as_ref().expect("turn radius");
+    assert_eq!(radius.unit.as_deref(), Some("m"));
+    assert_eq!(radius.samples, 2, "negative physical radii are omitted");
+    assert!((radius.maximum - 30.48).abs() < 1e-12);
+
+    let can = metrics
+        .numeric_channels
+        .iter()
+        .find(|summary| summary.channel == "CAN_Engine_Torque")
+        .expect("application-defined numeric channel");
+    assert_eq!(can.unit.as_deref(), Some("Nm"));
+    assert_eq!((can.minimum, can.maximum, can.mean), (250.0, 270.0, 260.0));
+}
+
+#[test]
+fn inertial_conversion_never_guesses_an_undeclared_unit() {
+    let source = "[column names]\nlongitudinal_acceleration CAN_Fuel\n[data]\n1.0 20\n2.0 22\n";
+    let metrics = Parser::default()
+        .parse_str(source)
+        .expect("parse")
+        .analyse();
+    assert_eq!(metrics.longitudinal_acceleration, None);
+    assert_eq!(metrics.numeric_channels.len(), 2);
+}
+
 proptest! {
     #[test]
     fn never_accepts_invalid_minutes(degrees in 0_u16..180_u16, minutes in 60.0_f64..100.0) {
