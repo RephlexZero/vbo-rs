@@ -1,0 +1,9 @@
+File created on 2026-01-01
+[header]
+vehicle: corpus
+[channel units]
+hhmmss degmin degmin kmh 1
+[column names]
+time lat long velocity sats
+[data]
+120000.0 5123.1234 00007.1234 80.0 137
