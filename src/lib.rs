@@ -21,8 +21,8 @@ pub use analysis::{
 pub use export::ExportError;
 pub use parser::{parse_path, ParseOptions, Parser};
 pub use telemetry::{
-    packed_minutes_to_degrees, CoordinateAxis, GeoPoint, SatelliteQuality, SessionMetrics,
-    Telemetry,
+    packed_minutes_to_degrees, CoordinateAxis, GeoPoint, NumericChannelSummary, SatelliteQuality,
+    SessionMetrics, Telemetry,
 };
 pub use types::{
     Channel, Header, ParseError, ParseIssue, ParseIssueKind, ParseReport, SampleRef, StreamReport,

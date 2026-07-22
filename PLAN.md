@@ -40,7 +40,7 @@ The checked items are implemented and covered by automated tests. This plan inte
 - [x] Pre-commit hook and bootstrap script
 - [x] GitHub CI: formatting, linting, tests, docs, audit, and OS/Rust matrix
 - [x] Tag-triggered publishing workflow with version/tag verification and GitHub release
-- [ ] Add `CARGO_REGISTRY_TOKEN` as a GitHub Actions repository secret
+- [x] Add `CARGO_REGISTRY_TOKEN` as a GitHub Actions repository secret
 - [x] Set the canonical GitHub repository URL in `Cargo.toml`
 - [x] Add licence, changelog policy, SECURITY.md, CODEOWNERS, and issue/PR templates
 - [ ] Add signed tags / trusted publishing and publish the first release

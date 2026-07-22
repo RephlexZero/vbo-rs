@@ -20,6 +20,14 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Audit dependencies
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enforce supply-chain policy
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
       - name: Verify tag matches Cargo package version
         shell: bash
         run: |
@@ -31,6 +39,7 @@ jobs:
           cargo fmt --check
           cargo clippy --all-targets --all-features -- -D warnings
           cargo test --all-features
+          RUSTDOCFLAGS='-D warnings' cargo doc --no-deps --all-features
           cargo package --locked
       - name: Publish to crates.io
         env:

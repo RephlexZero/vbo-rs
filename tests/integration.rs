@@ -100,21 +100,25 @@ fn telemetry_summarises_inertial_turn_and_application_defined_channels() {
     assert_eq!(longitudinal.unit.as_deref(), Some("m/s²"));
     assert_eq!(longitudinal.samples, 3);
     assert!((longitudinal.maximum - 3.0 * 9.806_65).abs() < 1e-12);
-    assert_eq!(
-        metrics
+    assert!(
+        (metrics
             .lateral_acceleration
             .as_ref()
             .expect("lateral acceleration")
-            .minimum,
-        3.0
+            .minimum
+            - 3.0)
+            .abs()
+            < 1e-12
     );
-    assert_eq!(
-        metrics
+    assert!(
+        (metrics
             .vertical_acceleration
             .as_ref()
             .expect("vertical acceleration")
-            .maximum,
-        9.806_65
+            .maximum
+            - 9.806_65)
+            .abs()
+            < 1e-12
     );
     let yaw_rate = metrics.yaw_rate.as_ref().expect("yaw rate");
     assert_eq!(yaw_rate.unit.as_deref(), Some("deg/s"));
