@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, fmt};
 use thiserror::Error;
 
 /// A named data channel declared by `[column names]`.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Channel {
     pub name: String,
@@ -10,6 +11,7 @@ pub struct Channel {
 }
 
 /// The non-tabular contents of a VBO header, preserved in source order by section.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Header {
     pub created: Option<String>,
@@ -23,6 +25,50 @@ pub struct Vbo {
     pub channels: Vec<Channel>,
     pub(crate) values: Vec<f64>,
     pub(crate) rows: usize,
+}
+
+/// Serialises a VBO as its metadata plus a rectangular `samples` matrix.
+///
+/// `Vbo` intentionally does not implement `Deserialize`: constructing it through [`Parser`]
+/// preserves its row/column invariants and configured resource limits.
+#[cfg(feature = "serde")]
+impl serde::Serialize for Vbo {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mut state = serializer.serialize_struct("Vbo", 3)?;
+        state.serialize_field("header", &self.header)?;
+        state.serialize_field("channels", &self.channels)?;
+        state.serialize_field("samples", &SerializableSamples { vbo: self })?;
+        state.end()
+    }
+}
+
+#[cfg(feature = "serde")]
+struct SerializableSamples<'a> {
+    vbo: &'a Vbo,
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for SerializableSamples<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeSeq;
+
+        let mut sequence = serializer.serialize_seq(Some(self.vbo.rows))?;
+        let width = self.vbo.channels.len();
+        if width != 0 {
+            for values in self.vbo.values.chunks_exact(width) {
+                sequence.serialize_element(values)?;
+            }
+        }
+        sequence.end()
+    }
 }
 
 impl Vbo {
@@ -95,12 +141,14 @@ impl fmt::Debug for SampleRef<'_> {
 }
 
 /// A non-fatal defect encountered in recovery mode.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParseIssue {
     pub line: usize,
     pub kind: ParseIssueKind,
 }
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ParseIssueKind {
     InvalidNumber { column: usize, value: String },

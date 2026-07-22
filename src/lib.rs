@@ -10,10 +10,15 @@ mod parser;
 mod telemetry;
 mod types;
 
+#[cfg(any(feature = "csv", feature = "gpx", feature = "parquet"))]
+mod export;
+
 pub use analysis::{
     align_channels, detect_laps, AlignedChannel, AnalysisError, Gate, GateDirection, Lap,
     LapConfig, SectorGate, SectorTime, TimeSeries, TimedPoint, MAX_RESAMPLED_SAMPLES,
 };
+#[cfg(any(feature = "csv", feature = "gpx", feature = "parquet"))]
+pub use export::ExportError;
 pub use parser::{parse_path, ParseOptions, Parser};
 pub use telemetry::{
     packed_minutes_to_degrees, CoordinateAxis, GeoPoint, SatelliteQuality, SessionMetrics,
