@@ -406,7 +406,7 @@ fn gate_crossing_fraction(before: GeoPoint, after: GeoPoint, gate: Gate) -> Opti
     ((0.0..=1.0).contains(&gate_fraction) && fraction.is_finite()).then_some(fraction)
 }
 
-const fn matches_direction(before: f64, after: f64, direction: GateDirection) -> bool {
+fn matches_direction(before: f64, after: f64, direction: GateDirection) -> bool {
     match direction {
         GateDirection::Either => true,
         GateDirection::NegativeToPositive => before < 0.0 && after > 0.0,
@@ -414,11 +414,11 @@ const fn matches_direction(before: f64, after: f64, direction: GateDirection) ->
     }
 }
 
-const fn cross(left: (f64, f64), right: (f64, f64)) -> f64 {
+fn cross(left: (f64, f64), right: (f64, f64)) -> f64 {
     left.0 * right.1 - left.1 * right.0
 }
 
-const fn dot(left: (f64, f64), right: (f64, f64)) -> f64 {
+fn dot(left: (f64, f64), right: (f64, f64)) -> f64 {
     left.0 * right.0 + left.1 * right.1
 }
 
