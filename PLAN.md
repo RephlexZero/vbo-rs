@@ -19,10 +19,10 @@ The checked items are implemented and covered by automated tests. This plan inte
 - [x] Decode satellite, DGPS, and brake-trigger bits
 - [x] Calculate duration (including UTC midnight rollover), Haversine distance, speed extrema/mean, and derived longitudinal acceleration
 - [x] Make metrics unit-aware from `[channel units]` and support km/h, knots, mph, and m/s
-- [ ] Native accelerometer, yaw, radius-of-turn, and CAN channel analysis
-- [ ] Lap/sector detection using configurable start/finish gates
-- [ ] Resampling, smoothing, alignment, and channel interpolation
-- [ ] GPX/CSV/Parquet export and serde integration
+- [x] Native accelerometer, yaw, radius-of-turn, and CAN channel analysis
+- [x] Lap/sector detection using configurable start/finish gates
+- [x] Resampling, smoothing, alignment, and channel interpolation
+- [x] GPX/CSV/Parquet export and serde integration
 
 ## Performance and resilience
 
@@ -30,8 +30,8 @@ The checked items are implemented and covered by automated tests. This plan inte
 - [x] Fuzz/property tests for coordinate and parser boundary conditions
 - [x] Reproducible parser/telemetry benchmark suite (real-world corpus thresholds remain to be added)
 - [x] Bounded-memory streaming parser with synchronous row callback and diagnostic limits
-- [ ] SIMD/fast-float parsing benchmark and optional optimized parser backend
-- [ ] Corpus-based fuzz target and continuous fuzzing
+- [x] SIMD/fast-float parsing benchmark and optional optimized parser backend
+- [x] Corpus-based fuzz target and continuous fuzzing
 - [ ] Differential tests against VBOX Tools exports and vendor hardware captures
 
 ## Delivery and governance

@@ -19,7 +19,7 @@ pub use analysis::{
 };
 #[cfg(any(feature = "csv", feature = "gpx", feature = "parquet"))]
 pub use export::ExportError;
-pub use parser::{parse_path, ParseOptions, Parser};
+pub use parser::{parse_path, FloatParser, ParseOptions, Parser};
 pub use telemetry::{
     packed_minutes_to_degrees, CoordinateAxis, GeoPoint, NumericChannelSummary, SatelliteQuality,
     SessionMetrics, Telemetry,

@@ -63,4 +63,32 @@ The reproducible in-memory benchmarks exercise strict parsing and telemetry anal
 cargo bench
 ```
 
+To compare Rust's standard numeric conversion with the opt-in optimized parser, run:
+
+```bash
+cargo bench --features fast-float
+```
+
+## Analysis and export
+
+The analysis API provides gate-based lap/sector timing plus interpolation, uniform resampling,
+smoothing, and alignment for finite time series. `Telemetry::analyse` also summarises declared
+accelerometer, yaw-rate, turn-radius, and application/CAN-like numeric channels without guessing
+units or proprietary signal meanings.
+
+CSV, GPX, and serde support are enabled by default. Apache Parquet is opt-in because of its
+larger dependency footprint:
+
+```bash
+cargo add racelogic-vbo --features parquet
+```
+
+All writers accept a caller-owned `Write` sink (`Vbo::write_csv`, `write_gpx`,
+`write_parquet`) so applications can choose their own atomic-file strategy.
+
+## Fuzzing
+
+The repository includes a bounded recovery-parser fuzz target and a scheduled GitHub Actions
+smoke run. Locally, install `cargo-fuzz` and use `cd fuzz && cargo fuzz run parser`.
+
 Releases are published only by CI after pushing an annotated version tag such as `v0.1.0`. Configure the repository’s `CARGO_REGISTRY_TOKEN` GitHub Actions secret; do not commit a local crates.io key.
