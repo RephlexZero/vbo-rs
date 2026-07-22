@@ -24,6 +24,26 @@ println!("distance: {:?} m", metrics.distance_metres);
 
 For a detailed compatibility note, source links, and the exact coordinate convention, see [the VBO format reference](docs/VBO_FORMAT.md). Planned scope is tracked in [PLAN.md](PLAN.md).
 
+## Large recordings
+
+`parse_path` and `parse_reader` retain the complete table for random access and analysis. For
+large or unbounded logs, use `Parser::parse_bufread` with a `BufRead` source instead: it reuses
+one row buffer and delivers samples synchronously to your callback, retaining only header data
+and bounded recovery diagnostics. This is the recommended ingestion path for multi-GB recordings
+or direct database/Parquet export pipelines.
+
+```rust
+use std::{fs::File, io::BufReader};
+use racelogic_vbo::Parser;
+
+let mut speed_total = 0.0;
+let report = Parser::default().parse_bufread(BufReader::new(File::open("run.vbo")?), |row| {
+    speed_total += row.value(4).unwrap_or_default();
+})?;
+println!("processed {} samples", report.row_count());
+# Ok::<(), racelogic_vbo::ParseError>(())
+```
+
 ## Quality gates
 
 ```bash
@@ -31,6 +51,16 @@ For a detailed compatibility note, source links, and the exact coordinate conven
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
+cargo bench
+```
+
+## Benchmarks
+
+The reproducible in-memory benchmarks exercise strict parsing and telemetry analysis over a
+100,000-sample, 10 Hz VBO session (including time, position, speed, and satellite channels):
+
+```bash
+cargo bench
 ```
 
 Releases are published only by CI after pushing an annotated version tag such as `v0.1.0`. Configure the repository’s `CARGO_REGISTRY_TOKEN` GitHub Actions secret; do not commit a local crates.io key.

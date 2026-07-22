@@ -115,6 +115,107 @@ pub struct ParseReport {
     pub issues: Vec<ParseIssue>,
 }
 
+/// Summary produced after a streaming parse completes.
+///
+/// Unlike [`ParseReport`], this type deliberately does not retain every data row. It contains
+/// only the VBO metadata, the count of accepted samples, and any recovery diagnostics.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StreamReport {
+    pub header: Header,
+    pub channels: Vec<Channel>,
+    pub rows: usize,
+    pub issues: Vec<ParseIssue>,
+}
+
+impl StreamReport {
+    #[must_use]
+    pub const fn row_count(&self) -> usize {
+        self.rows
+    }
+
+    #[must_use]
+    pub fn column_count(&self) -> usize {
+        self.channels.len()
+    }
+}
+
+/// A temporary, zero-copy view of one sample delivered by [`Parser`](crate::Parser)'s streaming
+/// APIs.
+///
+/// The value slice is reused for the next row. Consume it during the callback rather than trying
+/// to retain references to it.
+#[derive(Clone, Copy)]
+pub struct StreamSample<'a> {
+    row: usize,
+    line: usize,
+    values: &'a [f64],
+    header: &'a Header,
+    channels: &'a [Channel],
+}
+
+impl<'a> StreamSample<'a> {
+    pub(crate) const fn new(
+        row: usize,
+        line: usize,
+        values: &'a [f64],
+        header: &'a Header,
+        channels: &'a [Channel],
+    ) -> Self {
+        Self {
+            row,
+            line,
+            values,
+            header,
+            channels,
+        }
+    }
+
+    /// Zero-based index among accepted data rows.
+    #[must_use]
+    pub const fn row_index(self) -> usize {
+        self.row
+    }
+
+    /// One-based physical source line number.
+    #[must_use]
+    pub const fn line_number(self) -> usize {
+        self.line
+    }
+
+    /// Values in the same order as [`Self::channels`].
+    #[must_use]
+    pub const fn values(self) -> &'a [f64] {
+        self.values
+    }
+
+    #[must_use]
+    pub fn value(self, column: usize) -> Option<f64> {
+        self.values.get(column).copied()
+    }
+
+    /// Header metadata known when the `[data]` section was reached.
+    #[must_use]
+    pub const fn header(self) -> &'a Header {
+        self.header
+    }
+
+    /// Column metadata in the same order as [`Self::values`].
+    #[must_use]
+    pub const fn channels(self) -> &'a [Channel] {
+        self.channels
+    }
+}
+
+impl fmt::Debug for StreamSample<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StreamSample")
+            .field("row", &self.row)
+            .field("line", &self.line)
+            .field("columns", &self.values.len())
+            .finish_non_exhaustive()
+    }
+}
+
 /// A contextual failure while reading or decoding VBO input.
 #[derive(Debug, Error)]
 pub enum ParseError {
@@ -142,6 +243,8 @@ pub enum ParseError {
     },
     #[error("configured row limit ({limit}) exceeded at line {line}")]
     RowLimit { line: usize, limit: usize },
+    #[error("configured recovery issue limit ({limit}) exceeded at line {line}")]
+    IssueLimit { line: usize, limit: usize },
 }
 
 pub(crate) fn normalise(value: &str) -> String {

@@ -28,8 +28,8 @@ The checked items are implemented and covered by automated tests. This plan inte
 
 - [x] Byte-oriented line scanning and allocation-free numeric-field tokenisation
 - [x] Fuzz/property tests for coordinate and parser boundary conditions
-- [ ] Benchmark suite with real-world corpus and allocation thresholds
-- [ ] Streaming iterator parser for bounded-memory processing
+- [x] Reproducible parser/telemetry benchmark suite (real-world corpus thresholds remain to be added)
+- [x] Bounded-memory streaming parser with synchronous row callback and diagnostic limits
 - [ ] SIMD/fast-float parsing benchmark and optional optimized parser backend
 - [ ] Corpus-based fuzz target and continuous fuzzing
 - [ ] Differential tests against VBOX Tools exports and vendor hardware captures
@@ -42,5 +42,5 @@ The checked items are implemented and covered by automated tests. This plan inte
 - [x] Tag-triggered publishing workflow with version/tag verification and GitHub release
 - [ ] Add `CARGO_REGISTRY_TOKEN` as a GitHub Actions repository secret
 - [x] Set the canonical GitHub repository URL in `Cargo.toml`
-- [ ] Add licences, changelog policy, SECURITY.md, CODEOWNERS, and issue/PR templates
+- [x] Add licence, changelog policy, SECURITY.md, CODEOWNERS, and issue/PR templates
 - [ ] Add signed tags / trusted publishing and publish the first release

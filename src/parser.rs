@@ -1,12 +1,15 @@
 use std::{
     fs::File,
-    io::{BufReader, Read},
+    io::{BufRead, BufReader, Read},
     path::Path,
 };
 
-use memchr::memchr_iter;
+use memchr::memchr;
 
-use crate::{Channel, Header, ParseError, ParseIssue, ParseIssueKind, ParseReport, Vbo};
+use crate::{
+    Channel, Header, ParseError, ParseIssue, ParseIssueKind, ParseReport, StreamReport,
+    StreamSample, Vbo,
+};
 
 /// Resource and compatibility controls for [`Parser`].
 #[derive(Clone, Debug)]
@@ -17,6 +20,8 @@ pub struct ParseOptions {
     pub max_line_bytes: usize,
     /// Hard cap for accepted data rows.
     pub max_rows: usize,
+    /// Hard cap for retained recovery diagnostics.
+    pub max_issues: usize,
 }
 
 impl Default for ParseOptions {
@@ -25,6 +30,7 @@ impl Default for ParseOptions {
             strict: true,
             max_line_bytes: 1024 * 1024,
             max_rows: 20_000_000,
+            max_issues: 10_000,
         }
     }
 }
@@ -47,57 +53,115 @@ impl Parser {
     }
 
     /// Parses a complete VBO input. Strict mode is transactional: no partial VBO is returned.
-    pub fn parse_reader<R: Read>(&self, mut reader: R) -> Result<Vbo, ParseError> {
-        let mut input = Vec::new();
-        reader.read_to_end(&mut input)?;
-        self.parse_bytes(&input, false).map(|report| report.vbo)
+    ///
+    /// For unbounded recordings, prefer [`Self::parse_bufread`], which does not retain samples.
+    pub fn parse_reader<R: Read>(&self, reader: R) -> Result<Vbo, ParseError> {
+        let mut values = Vec::new();
+        let report = self.parse_bufread(BufReader::new(reader), |sample| {
+            values.extend_from_slice(sample.values());
+        })?;
+        Ok(Vbo {
+            header: report.header,
+            channels: report.channels,
+            values,
+            rows: report.rows,
+        })
     }
 
     /// Parses while omitting malformed data records and collecting their diagnostics.
     /// Header-structure errors remain fatal because they make column alignment ambiguous.
-    pub fn parse_reader_recovering<R: Read>(
-        &self,
-        mut reader: R,
-    ) -> Result<ParseReport, ParseError> {
-        let mut input = Vec::new();
-        reader.read_to_end(&mut input)?;
-        self.parse_bytes(&input, true)
+    pub fn parse_reader_recovering<R: Read>(&self, reader: R) -> Result<ParseReport, ParseError> {
+        let mut values = Vec::new();
+        let report = self.parse_bufread_recovering(BufReader::new(reader), |sample| {
+            values.extend_from_slice(sample.values());
+        })?;
+        Ok(ParseReport {
+            vbo: Vbo {
+                header: report.header,
+                channels: report.channels,
+                values,
+                rows: report.rows,
+            },
+            issues: report.issues,
+        })
     }
 
     pub fn parse_str(&self, input: &str) -> Result<Vbo, ParseError> {
-        self.parse_bytes(input.as_bytes(), false)
-            .map(|report| report.vbo)
+        self.parse_reader(std::io::Cursor::new(input.as_bytes()))
+    }
+
+    /// Streams accepted VBO data rows from a buffered reader without retaining the table.
+    ///
+    /// The callback is called synchronously for each valid row. [`StreamSample`] borrows a
+    /// reusable row buffer, so copy values inside the callback only when they must outlive it.
+    /// Strict mode stops at the first malformed data row.
+    pub fn parse_bufread<R, F>(&self, reader: R, visitor: F) -> Result<StreamReport, ParseError>
+    where
+        R: BufRead,
+        F: FnMut(StreamSample<'_>),
+    {
+        self.parse_bufread_inner(reader, false, visitor)
+    }
+
+    /// Streams valid rows and records malformed data-row diagnostics instead of stopping.
+    ///
+    /// Header-structure and UTF-8 errors remain fatal because a reliable stream cannot be
+    /// formed from them.
+    pub fn parse_bufread_recovering<R, F>(
+        &self,
+        reader: R,
+        visitor: F,
+    ) -> Result<StreamReport, ParseError>
+    where
+        R: BufRead,
+        F: FnMut(StreamSample<'_>),
+    {
+        self.parse_bufread_inner(reader, true, visitor)
     }
 
     #[allow(clippy::too_many_lines)] // The state machine is deliberately kept in one audit-friendly place.
-    fn parse_bytes(&self, input: &[u8], force_recovery: bool) -> Result<ParseReport, ParseError> {
+    fn parse_bufread_inner<R, F>(
+        &self,
+        mut reader: R,
+        force_recovery: bool,
+        mut visitor: F,
+    ) -> Result<StreamReport, ParseError>
+    where
+        R: BufRead,
+        F: FnMut(StreamSample<'_>),
+    {
         let mut header = Header::default();
         let mut channels = Vec::new();
         let mut units = Vec::new();
-        let mut values = Vec::new();
         let mut issues = Vec::new();
         let mut section = Section::Preamble;
         let mut data_seen = false;
         let mut rows = 0usize;
         let recover = force_recovery || !self.options.strict;
-        let mut start = 0usize;
+        let mut line = 0usize;
+        let mut raw = Vec::with_capacity(self.options.max_line_bytes.saturating_add(1));
+        let mut row_values = Vec::new();
 
-        for (line, newline) in
-            (1usize..).zip(memchr_iter(b'\n', input).chain(std::iter::once(input.len())))
+        while let Some(physical_line_too_long) =
+            read_bounded_line(&mut reader, &mut raw, self.options.max_line_bytes)?
         {
-            let mut raw = &input[start..newline];
-            start = newline.saturating_add(1);
+            line += 1;
             if raw.last() == Some(&b'\r') {
-                raw = &raw[..raw.len() - 1];
+                raw.pop();
             }
-            if raw.len() > self.options.max_line_bytes {
+            if physical_line_too_long || raw.len() > self.options.max_line_bytes {
                 if recover && matches!(section, Section::Data) {
-                    issues.push(ParseIssue {
-                        line,
-                        kind: ParseIssueKind::LineTooLong {
-                            limit: self.options.max_line_bytes,
+                    push_issue(
+                        &mut issues,
+                        ParseIssue {
+                            line,
+                            kind: ParseIssueKind::LineTooLong {
+                                limit: self.options.max_line_bytes,
+                            },
                         },
-                    });
+                        self.options.max_issues,
+                        line,
+                    )?;
                     continue;
                 }
                 return Err(ParseError::LineTooLong {
@@ -105,7 +169,7 @@ impl Parser {
                     limit: self.options.max_line_bytes,
                 });
             }
-            let raw = trim_ascii(raw);
+            let raw = trim_ascii(&raw);
             if raw.is_empty() {
                 continue;
             }
@@ -116,6 +180,7 @@ impl Parser {
                 }
                 if matches!(next, Section::Data) {
                     data_seen = true;
+                    apply_units(&mut channels, &units);
                 }
                 section = next;
                 continue;
@@ -150,11 +215,24 @@ impl Parser {
                             limit: self.options.max_rows,
                         });
                     }
-                    match parse_row_into(text, channels.len(), line, &mut values) {
+                    row_values.clear();
+                    match parse_row_into(text, channels.len(), line, &mut row_values) {
                         Ok(()) => {
+                            visitor(StreamSample::new(
+                                rows,
+                                line,
+                                &row_values,
+                                &header,
+                                &channels,
+                            ));
                             rows += 1;
                         }
-                        Err(error) if recover => issues.push(issue_from(error)),
+                        Err(error) if recover => push_issue(
+                            &mut issues,
+                            issue_from(error),
+                            self.options.max_issues,
+                            line,
+                        )?,
                         Err(error) => return Err(error),
                     }
                 }
@@ -168,16 +246,11 @@ impl Parser {
         if !data_seen {
             return Err(ParseError::MissingData);
         }
-        for (channel, unit) in channels.iter_mut().zip(units) {
-            channel.unit = Some(unit);
-        }
-        Ok(ParseReport {
-            vbo: Vbo {
-                header,
-                channels,
-                values,
-                rows,
-            },
+        apply_units(&mut channels, &units);
+        Ok(StreamReport {
+            header,
+            channels,
+            rows,
             issues,
         })
     }
@@ -284,6 +357,63 @@ fn issue_from(error: ParseError) -> ParseIssue {
             kind: ParseIssueKind::LineTooLong { limit },
         },
         _ => unreachable!("only record-local parser errors are recoverable"),
+    }
+}
+
+fn push_issue(
+    issues: &mut Vec<ParseIssue>,
+    issue: ParseIssue,
+    limit: usize,
+    line: usize,
+) -> Result<(), ParseError> {
+    if issues.len() >= limit {
+        return Err(ParseError::IssueLimit { line, limit });
+    }
+    issues.push(issue);
+    Ok(())
+}
+
+fn apply_units(channels: &mut [Channel], units: &[String]) {
+    for (channel, unit) in channels.iter_mut().zip(units) {
+        channel.unit = Some(unit.clone());
+    }
+}
+
+/// Reads one physical line while retaining at most `limit + 1` bytes.
+///
+/// The extra byte distinguishes a line at the limit followed by CRLF from a genuinely oversized
+/// line. The rest of an oversized line is consumed directly from `BufRead` without allocating.
+fn read_bounded_line<R: BufRead>(
+    reader: &mut R,
+    output: &mut Vec<u8>,
+    limit: usize,
+) -> std::io::Result<Option<bool>> {
+    output.clear();
+    let storage_limit = limit.saturating_add(1);
+    let mut saw_line = false;
+    let mut too_long = false;
+
+    loop {
+        let buffer = reader.fill_buf()?;
+        if buffer.is_empty() {
+            return Ok(saw_line.then_some(too_long));
+        }
+
+        let newline = memchr(b'\n', buffer);
+        let bytes_before_newline = newline.unwrap_or(buffer.len());
+        if bytes_before_newline > 0 {
+            saw_line = true;
+            let available = storage_limit.saturating_sub(output.len());
+            let retained = bytes_before_newline.min(available);
+            output.extend_from_slice(&buffer[..retained]);
+            too_long |= retained < bytes_before_newline;
+        }
+
+        let consumed = newline.map_or(bytes_before_newline, |index| index + 1);
+        reader.consume(consumed);
+        if newline.is_some() {
+            return Ok(Some(too_long));
+        }
     }
 }
 

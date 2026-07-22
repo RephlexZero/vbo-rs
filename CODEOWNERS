@@ -1,0 +1,9 @@
+# Default review owner for all repository content.
+* @RephlexZero
+
+# Changes affecting publication and automation require maintainer review.
+/.github/ @RephlexZero
+/Cargo.toml @RephlexZero
+/Cargo.lock @RephlexZero
+/deny.toml @RephlexZero
+/SECURITY.md @RephlexZero

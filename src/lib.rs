@@ -15,5 +15,6 @@ pub use telemetry::{
     Telemetry,
 };
 pub use types::{
-    Channel, Header, ParseError, ParseIssue, ParseIssueKind, ParseReport, SampleRef, Vbo,
+    Channel, Header, ParseError, ParseIssue, ParseIssueKind, ParseReport, SampleRef, StreamReport,
+    StreamSample, Vbo,
 };
