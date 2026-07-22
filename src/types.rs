@@ -29,7 +29,8 @@ pub struct Vbo {
 
 /// Serialises a VBO as its metadata plus a rectangular `samples` matrix.
 ///
-/// `Vbo` intentionally does not implement `Deserialize`: constructing it through [`Parser`]
+/// `Vbo` intentionally does not implement `Deserialize`: constructing it through
+/// [`crate::Parser`]
 /// preserves its row/column invariants and configured resource limits.
 #[cfg(feature = "serde")]
 impl serde::Serialize for Vbo {
