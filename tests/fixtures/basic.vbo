@@ -1,0 +1,22 @@
+File created on 31/07/2006 at 09:55:20
+[header]
+satellites
+time
+latitude
+longitude
+velocity kmh
+heading
+height
+vertical velocity kmh
+[channel units]
+count hhmmss.dd ddmm.mmmmm dddmm.mmmmm kmh deg m kmh
+[comments]
+(c) 2001 2003 Racelogic
+Serial Number : 005201
+Log Rate (Hz) : 02.00
+[column names]
+sats time lat long velocity heading height vertvel
+[data]
+137 162235.40 +3119.09973 +00058.49277 000.140 321.85 +00152.58 +000.000
+137 162235.90 +3119.09983 +00058.49287 000.220 065.93 +00152.58 +000.000
+009 162236.40 +3119.10003 +00058.49307 000.250 356.43 +00152.59 000.072

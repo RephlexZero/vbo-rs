@@ -1,0 +1,29 @@
+[package]
+name = "racelogic-vbo"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Fast, resilient parser and telemetry toolkit for Racelogic VBOX .vbo logs"
+license = "MIT"
+repository = "https://github.com/RephlexZero/vbo-rs"
+keywords = ["racelogic", "vbox", "vbo", "telemetry", "motorsport"]
+categories = ["parser-implementations", "science", "aerospace"]
+readme = "README.md"
+include = ["src/**", "tests/**", "docs/**", "README.md", "PLAN.md", "LICENSE-MIT", "CHANGELOG.md"]
+
+[dependencies]
+memchr = "2.7"
+thiserror = "1.0"
+
+[dev-dependencies]
+proptest = "1.5"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
