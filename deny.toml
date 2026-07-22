@@ -8,7 +8,9 @@ all-features = true
 [advisories]
 version = 2
 yanked = "warn"
-ignore = []
+# `paste` is an unmaintained macro-only transitive dependency of Parquet. There is no patched
+# release or MSRV-compatible Parquet upgrade that removes it; review this exception on updates.
+ignore = ["RUSTSEC-2024-0436"]
 
 [licenses]
 version = 2
@@ -17,6 +19,7 @@ allow = [
     "Apache-2.0",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "CC0-1.0",
     "ISC",
     "MIT",
     "Unicode-3.0",
