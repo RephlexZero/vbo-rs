@@ -1,8 +1,8 @@
 //! Reproducible end-to-end throughput benchmarks using a representative 10 Hz VBO recording.
 
-use std::fmt::Write;
+use std::{fmt::Write, hint::black_box};
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use racelogic_vbo::{Parser, Telemetry};
 
 const SAMPLE_COUNT: usize = 100_000;
