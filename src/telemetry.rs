@@ -1,10 +1,100 @@
-use crate::{types::normalise, Vbo};
+use crate::{
+    types::{normalise, Channel},
+    Vbo,
+};
 
 /// Axis semantics for Racelogic's packed-minutes coordinate encoding.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CoordinateAxis {
     Latitude,
     Longitude,
+}
+
+/// Which real-world Racelogic `lat`/`long` convention a recording uses.
+///
+/// Classic VBOX/VBOX3 loggers use the documented packed `DDMM.MMMM` format (see
+/// `docs/VBO_FORMAT.md`), but some newer hardware — observed on a Video VBOX HD2 dashcam unit —
+/// logs `lat`/`long` as plain continuous minutes instead. [`Vbo::coordinate_format`] detects this
+/// once per recording, so [`Telemetry::geo_point`] and [`Telemetry::analyse`] decode every row
+/// consistently without re-detecting per call.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum CoordinateFormat {
+    /// `DDMM.MMMM` / `DDDMM.MMMM`: degrees and minutes packed into one field.
+    #[default]
+    PackedDegreesMinutes,
+    /// A single continuous value in minutes (degrees × 60 + minutes).
+    ContinuousMinutes,
+}
+
+/// Detects which [`CoordinateFormat`] a recording's `lat`/`long` channels use.
+///
+/// A genuine packed-format recording decodes almost every row; if the packed convention fails
+/// for the majority of rows with present coordinates, the hardware logs continuous minutes
+/// instead. Runs once per recording, before any [`Vbo`] exists, so it addresses `values`
+/// positionally rather than through [`Vbo::value`].
+#[must_use]
+pub(crate) fn detect_coordinate_format(
+    channels: &[Channel],
+    values: &[f64],
+    rows: usize,
+) -> CoordinateFormat {
+    let width = channels.len();
+    if width == 0 || rows == 0 {
+        return CoordinateFormat::PackedDegreesMinutes;
+    }
+    let Some(lat_column) = find_channel(channels, &["lat", "latitude"]) else {
+        return CoordinateFormat::PackedDegreesMinutes;
+    };
+    let Some(long_column) = find_channel(channels, &["long", "longitude", "lon"]) else {
+        return CoordinateFormat::PackedDegreesMinutes;
+    };
+
+    let mut present = 0usize;
+    let mut packed_valid = 0usize;
+    for row in 0..rows {
+        let latitude = values[row * width + lat_column];
+        let longitude = values[row * width + long_column];
+        if !latitude.is_finite() || !longitude.is_finite() {
+            continue;
+        }
+        present += 1;
+        let packed = packed_minutes_to_degrees(latitude, CoordinateAxis::Latitude).is_some()
+            && packed_minutes_to_degrees(longitude, CoordinateAxis::Longitude).is_some();
+        if packed {
+            packed_valid += 1;
+        }
+    }
+
+    if present > 0 && packed_valid * 2 < present {
+        CoordinateFormat::ContinuousMinutes
+    } else {
+        CoordinateFormat::PackedDegreesMinutes
+    }
+}
+
+fn find_channel(channels: &[Channel], aliases: &[&str]) -> Option<usize> {
+    channels.iter().position(|channel| {
+        aliases
+            .iter()
+            .any(|alias| normalise(&channel.name) == *alias)
+    })
+}
+
+/// Decodes a continuous-minutes `lat`/`long` pair. See [`CoordinateFormat::ContinuousMinutes`].
+fn continuous_minutes_to_degrees(
+    latitude_minutes: f64,
+    longitude_minutes: f64,
+) -> Option<GeoPoint> {
+    if !latitude_minutes.is_finite() || !longitude_minutes.is_finite() {
+        return None;
+    }
+    let latitude_deg = latitude_minutes / 60.0;
+    // Racelogic's legacy sign convention applies here too: positive VBO longitude means west.
+    let longitude_deg = -longitude_minutes / 60.0;
+    (latitude_deg.abs() <= 90.0 && longitude_deg.abs() <= 180.0).then_some(GeoPoint {
+        latitude_deg,
+        longitude_deg,
+    })
 }
 
 /// A WGS84-compatible geographic point in conventional signed decimal degrees.
@@ -98,10 +188,7 @@ impl Telemetry for Vbo {
         let longitude = self
             .alias_column(&["long", "longitude", "lon"])
             .and_then(|column| self.value(row, column))?;
-        Some(GeoPoint {
-            latitude_deg: packed_minutes_to_degrees(latitude, CoordinateAxis::Latitude)?,
-            longitude_deg: packed_minutes_to_degrees(longitude, CoordinateAxis::Longitude)?,
-        })
+        self.decode_geo_point(latitude, longitude)
     }
 
     fn satellite_quality(&self, row: usize) -> Option<SatelliteQuality> {
@@ -196,18 +283,7 @@ impl Telemetry for Vbo {
             let point = latitude_column
                 .and_then(|column| self.value(row, column))
                 .zip(longitude_column.and_then(|column| self.value(row, column)))
-                .and_then(|(latitude, longitude)| {
-                    Some(GeoPoint {
-                        latitude_deg: packed_minutes_to_degrees(
-                            latitude,
-                            CoordinateAxis::Latitude,
-                        )?,
-                        longitude_deg: packed_minutes_to_degrees(
-                            longitude,
-                            CoordinateAxis::Longitude,
-                        )?,
-                    })
-                });
+                .and_then(|(latitude, longitude)| self.decode_geo_point(latitude, longitude));
             if let Some(point) = point {
                 if let Some(last) = previous_point {
                     distance += haversine_metres(last, point);
@@ -225,11 +301,21 @@ impl Telemetry for Vbo {
 
 impl Vbo {
     fn alias_column(&self, aliases: &[&str]) -> Option<usize> {
-        self.channels.iter().position(|channel| {
-            aliases
-                .iter()
-                .any(|alias| normalise(&channel.name) == *alias)
-        })
+        find_channel(&self.channels, aliases)
+    }
+
+    /// Decodes one `lat`/`long` sample pair using this recording's detected
+    /// [`CoordinateFormat`].
+    fn decode_geo_point(&self, latitude: f64, longitude: f64) -> Option<GeoPoint> {
+        match self.coordinate_format {
+            CoordinateFormat::PackedDegreesMinutes => Some(GeoPoint {
+                latitude_deg: packed_minutes_to_degrees(latitude, CoordinateAxis::Latitude)?,
+                longitude_deg: packed_minutes_to_degrees(longitude, CoordinateAxis::Longitude)?,
+            }),
+            CoordinateFormat::ContinuousMinutes => {
+                continuous_minutes_to_degrees(latitude, longitude)
+            }
+        }
     }
 
     fn numeric_channel_summaries(&self) -> Vec<NumericChannelSummary> {

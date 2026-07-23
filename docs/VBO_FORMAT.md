@@ -43,6 +43,12 @@ The VBOX II manual additionally describes trigger event time as the interval fro
 
 For a packed absolute value `DDDMM.MMMMM`, calculate `degrees + minutes / 60`. Apply the sign after conversion. Racelogic’s legacy convention is unusual for longitude: **positive VBO longitude means west**. `packed_minutes_to_degrees(..., Longitude)` returns conventional geographic longitude, so it negates a positive VBO longitude. This is intentionally documented and tested to prevent silent east/west mirroring.
 
+### Hardware disagrees on this encoding
+
+The packed `DDMM.MMMM` format above is what Racelogic's own VBOX II manual and support KB document, and it is correct for classic VBOX/VBOX3 loggers. However, at least one newer product — a Video VBOX HD2 (`VBVDHD2-V1`) dashcam unit with an internal uBlox GNSS receiver — instead logs `lat`/`long` as a single **continuous value in minutes** (`degrees × 60 + minutes`, no packing), with the same west-positive longitude sign convention. A real recording from this hardware fails to decode under the packed convention on essentially every row (the minutes remainder is reliably ≥ 60), yet resolves cleanly under the continuous convention — confirmed both geographically (a known UK circuit) and physically (GPS-implied inter-sample distance matches the logged `velocity` channel).
+
+Because the wire format gives no reliable static marker for which convention a given file uses, `Vbo::coordinate_format` (see [`CoordinateFormat`]) detects it once per recording: it counts how many rows validly decode under the packed convention, and falls back to continuous minutes only when the packed convention fails for the majority of rows with present coordinates. `Telemetry::geo_point` and `Telemetry::analyse` apply the detected convention consistently across every row. Racelogic hardware differs by generation; if you hit a third convention, add its real fixture under `tests/fixtures/` before extending `CoordinateFormat`.
+
 ## Parser policy
 
 - The default parser requires `[column names]` before `[data]`, validates every numeric token, and is transactional.

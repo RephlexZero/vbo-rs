@@ -1,0 +1,21 @@
+File created on 07/03/2025 at 16:27:40
+[header]
+satellites
+time
+latitude
+longitude
+velocity kmh
+heading
+height
+vertical velocity kmh
+[channel units]
+count hhmmss.dd ddmm.mmmmm dddmm.mmmmm kmh deg m kmh
+[comments]
+(c) Racelogic
+Type   : VBVDHD2-V1 2cam
+[column names]
+sats time lat long velocity heading height vertvel
+[data]
+137 152741.700 +3190.73255400 +0156.77093400 016.510 150.634 +00085.02 -0000.02
+137 152741.800 +3190.73233200 +0156.77075400 016.578 151.425 +00085.05 -0000.01
+137 152741.900 +3190.73209800 +0156.77058000 016.834 153.137 +00085.05 -0000.01

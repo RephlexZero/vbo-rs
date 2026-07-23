@@ -2,11 +2,12 @@ use std::io::Cursor;
 
 use proptest::prelude::*;
 use racelogic_vbo::{
-    packed_minutes_to_degrees, CoordinateAxis, ParseError, ParseIssueKind, ParseOptions, Parser,
-    Telemetry,
+    packed_minutes_to_degrees, CoordinateAxis, CoordinateFormat, ParseError, ParseIssueKind,
+    ParseOptions, Parser, Telemetry,
 };
 
 const BASIC: &str = include_str!("fixtures/basic.vbo");
+const CONTINUOUS_MINUTES: &str = include_str!("fixtures/continuous_minutes.vbo");
 
 #[test]
 fn parses_documented_shape_and_decodes_telemetry() {
@@ -26,10 +27,36 @@ fn parses_documented_shape_and_decodes_telemetry() {
         point.longitude_deg < 0.0,
         "positive VBO longitude means west"
     );
+    assert_eq!(
+        vbo.coordinate_format(),
+        CoordinateFormat::PackedDegreesMinutes
+    );
     let metrics = vbo.analyse();
     assert_eq!(metrics.samples, 3);
     assert!(metrics.distance_metres.expect("distance") > 0.0);
     assert_eq!(metrics.max_speed_kmh, Some(0.25));
+}
+
+/// Some hardware — observed on a Video VBOX HD2 dashcam unit — logs `lat`/`long` as a single
+/// continuous value in minutes rather than the documented packed `DDMM.MMMM` format. Every row
+/// in this real-world fixture fails to decode under the packed convention (the minutes remainder
+/// is always over 60), so the recording must be auto-detected as `ContinuousMinutes` for its
+/// coordinates, distance, and speed to resolve at all.
+#[test]
+fn auto_detects_continuous_minutes_hardware() {
+    let vbo = Parser::default()
+        .parse_str(CONTINUOUS_MINUTES)
+        .expect("fixture parses");
+    assert_eq!(vbo.coordinate_format(), CoordinateFormat::ContinuousMinutes);
+
+    let point = vbo.geo_point(0).expect("coordinates");
+    // Real-world reference: Oulton Park Circuit, Cheshire, UK.
+    assert!((point.latitude_deg - 53.178_876).abs() < 1e-3);
+    assert!((point.longitude_deg - -2.612_849).abs() < 1e-3);
+
+    let metrics = vbo.analyse();
+    assert!(metrics.distance_metres.expect("distance") > 0.0);
+    assert!(metrics.max_speed_kmh.expect("speed") > 0.0);
 }
 
 #[test]

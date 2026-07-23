@@ -2,6 +2,8 @@ use std::{collections::BTreeMap, fmt};
 
 use thiserror::Error;
 
+use crate::telemetry::CoordinateFormat;
+
 /// A named data channel declared by `[column names]`.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -25,6 +27,7 @@ pub struct Vbo {
     pub channels: Vec<Channel>,
     pub(crate) values: Vec<f64>,
     pub(crate) rows: usize,
+    pub(crate) coordinate_format: CoordinateFormat,
 }
 
 /// Serialises a VBO as its metadata plus a rectangular `samples` matrix.
@@ -73,6 +76,35 @@ impl serde::Serialize for SerializableSamples<'_> {
 }
 
 impl Vbo {
+    /// Builds a `Vbo` and detects its `lat`/`long` coordinate convention once, up front.
+    ///
+    /// Racelogic hardware generations disagree on this: classic VBOX/VBOX3 loggers use the
+    /// documented packed `DDMM.MMMM` format, but some newer hardware (observed on a Video VBOX
+    /// HD2 dashcam unit) logs `lat`/`long` as plain continuous minutes instead. See
+    /// [`CoordinateFormat`] and `docs/VBO_FORMAT.md`.
+    pub(crate) fn new(
+        header: Header,
+        channels: Vec<Channel>,
+        values: Vec<f64>,
+        rows: usize,
+    ) -> Self {
+        let coordinate_format =
+            crate::telemetry::detect_coordinate_format(&channels, &values, rows);
+        Self {
+            header,
+            channels,
+            values,
+            rows,
+            coordinate_format,
+        }
+    }
+
+    /// The `lat`/`long` coordinate convention detected for this recording.
+    #[must_use]
+    pub fn coordinate_format(&self) -> CoordinateFormat {
+        self.coordinate_format
+    }
+
     #[must_use]
     pub fn row_count(&self) -> usize {
         self.rows

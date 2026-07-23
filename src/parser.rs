@@ -78,12 +78,12 @@ impl Parser {
         let report = self.parse_bufread(BufReader::new(reader), |sample| {
             values.extend_from_slice(sample.values());
         })?;
-        Ok(Vbo {
-            header: report.header,
-            channels: report.channels,
+        Ok(Vbo::new(
+            report.header,
+            report.channels,
             values,
-            rows: report.rows,
-        })
+            report.rows,
+        ))
     }
 
     /// Parses while omitting malformed data records and collecting their diagnostics.
@@ -94,12 +94,7 @@ impl Parser {
             values.extend_from_slice(sample.values());
         })?;
         Ok(ParseReport {
-            vbo: Vbo {
-                header: report.header,
-                channels: report.channels,
-                values,
-                rows: report.rows,
-            },
+            vbo: Vbo::new(report.header, report.channels, values, report.rows),
             issues: report.issues,
         })
     }

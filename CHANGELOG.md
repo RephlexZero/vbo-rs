@@ -4,6 +4,12 @@ All notable changes follow [Keep a Changelog](https://keepachangelog.com/en/1.1.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-23
+
+### Fixed
+
+- `Telemetry::geo_point` and `Telemetry::analyse` now auto-detect a recording's `lat`/`long` coordinate convention instead of assuming the documented packed `DDMM.MMMM` format unconditionally. Some hardware (observed on a Video VBOX HD2 dashcam unit) logs continuous minutes instead, which previously made every coordinate on those recordings silently fail to decode. Detection is per-recording and non-breaking: files that already decode correctly under the packed convention are unaffected. See `docs/VBO_FORMAT.md` and the new `CoordinateFormat` type.
+
 ## [0.1.0] - 2026-07-22
 
 ### Added
