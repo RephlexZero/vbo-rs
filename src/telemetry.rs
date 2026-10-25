@@ -51,9 +51,11 @@ pub(crate) fn detect_coordinate_format(
 
     let mut present = 0usize;
     let mut packed_valid = 0usize;
-    for row in 0..rows {
-        let latitude = values[row * width + lat_column];
-        let longitude = values[row * width + long_column];
+    // `chunks_exact` keeps this bounds-safe even if `values` holds fewer than `rows * width`
+    // entries (e.g. a malformed file whose column list grew after data rows were read).
+    for row in values.chunks_exact(width).take(rows) {
+        let latitude = row[lat_column];
+        let longitude = row[long_column];
         if !latitude.is_finite() || !longitude.is_finite() {
             continue;
         }

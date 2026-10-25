@@ -182,3 +182,20 @@ proptest! {
         prop_assert_eq!(packed_minutes_to_degrees(packed, CoordinateAxis::Longitude), None);
     }
 }
+
+#[test]
+fn coordinate_detection_survives_column_names_after_data() {
+    // Regression for a fuzz-found panic: a second `[column names]` section after data rows
+    // grows the channel list past the width of the rows already read.
+    let input = "[column names]\nsats\n[data]\n1\n[column names]\ntime lat long\n[data]\n";
+    let report = Parser::new(ParseOptions {
+        strict: false,
+        ..ParseOptions::default()
+    })
+    .parse_reader_recovering(Cursor::new(input))
+    .expect("recover");
+    assert_eq!(
+        report.vbo.coordinate_format(),
+        CoordinateFormat::PackedDegreesMinutes
+    );
+}

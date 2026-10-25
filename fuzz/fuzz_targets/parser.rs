@@ -11,6 +11,7 @@ fuzz_target!(|data: &[u8]| {
         max_line_bytes: 64 * 1024,
         max_rows: 10_000,
         max_issues: 1_000,
+        ..ParseOptions::default()
     });
     let _ = parser.parse_reader_recovering(Cursor::new(data));
 });
